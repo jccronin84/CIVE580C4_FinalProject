@@ -6,6 +6,9 @@ import streamlit as st
 # Default data path (same directory as this project)
 DEFAULT_DATA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Final.Project.Data.xlsx")
 
+# Restrict app to these five cities only (applied at load time to both data sources)
+ALLOWED_CITIES = ["Denver", "Miami", "Phoenix", "San Diego", "Seattle"]
+
 # Metric columns = all columns except the first (city name)
 def get_metric_columns(df):
     """Return list of column names excluding the first column (city)."""
@@ -14,32 +17,46 @@ def get_metric_columns(df):
     return list(df.columns[1:])
 
 
-def load_excel():
+def load_reduced_list():
     """
-    Load data from the hardcoded Final.Project.Data.xlsx file.
-    Uses Sheet1, columns F:N. Tries header in row 3 (0-based index 2) first;
-    if column names are Unnamed, tries row 4 (index 3) for compatibility.
+    Load primary data from the Reduced List sheet.
+    Headers in row 7 (header=6), columns E:O. Drops null/empty city name, strips column names.
     """
-    def _read(header_row=2):
-        return pd.read_excel(
-            DEFAULT_DATA_PATH,
-            sheet_name="Sheet1",
-            usecols="F:N",
-            header=header_row,
-            engine="openpyxl",
-        )
     if not os.path.isfile(DEFAULT_DATA_PATH):
         return None
-    df = _read()
-    # If we got Unnamed columns, retry with next row (some sheets use row 4 for headers)
-    if df.columns[0].startswith("Unnamed"):
-        df = _read(header_row=3)
-    # Strip whitespace from column names
+    df = pd.read_excel(
+        DEFAULT_DATA_PATH,
+        sheet_name="Reduced List",
+        usecols="E:O",
+        header=6,
+        engine="openpyxl",
+    )
     df.columns = df.columns.str.strip()
-    # Drop rows where city name is null or empty
     city_col = df.columns[0]
     df = df.dropna(subset=[city_col])
     df = df[df[city_col].astype(str).str.strip() != ""]
+    df = df[df[city_col].astype(str).str.strip().isin(ALLOWED_CITIES)]
+    return df.reset_index(drop=True)
+
+
+def load_cooling_cost_method():
+    """
+    Load Cooling Cost Method sheet. Header row 0. Drops rows where City is null.
+    """
+    if not os.path.isfile(DEFAULT_DATA_PATH):
+        return None
+    df = pd.read_excel(
+        DEFAULT_DATA_PATH,
+        sheet_name="Cooling Cost Method",
+        header=0,
+        engine="openpyxl",
+    )
+    df.columns = df.columns.str.strip()
+    if "City" not in df.columns:
+        return df
+    df["City"] = df["City"].ffill()
+    df = df.dropna(subset=["City"])
+    df = df[df["City"].astype(str).str.strip().isin(ALLOWED_CITIES)]
     return df.reset_index(drop=True)
 
 
@@ -170,10 +187,14 @@ def inject_css():
 
 def setup_sidebar():
     """
-    Load data into session_state and show status in sidebar.
+    Load both data sources into session_state and show status in sidebar.
     Call this at the top of every page so navigation and data stay in sync.
     """
-    df = load_excel()
+    df = load_reduced_list()
+    df_cooling = load_cooling_cost_method()
     st.session_state["df"] = df
+    st.session_state["df_cooling"] = df_cooling
     if df is not None:
-        st.sidebar.caption(f"Loaded: **{len(df)}** cities")
+        st.sidebar.caption(f"Reduced List: **{len(df)}** cities")
+    if df_cooling is not None:
+        st.sidebar.caption(f"Cooling Cost: **{len(df_cooling)}** rows")
