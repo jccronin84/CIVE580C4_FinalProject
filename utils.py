@@ -9,36 +9,6 @@ DEFAULT_DATA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Fi
 # Restrict app to these five cities only (applied at load time to both data sources)
 ALLOWED_CITIES = ["Denver", "Miami", "Phoenix", "San Diego", "Seattle"]
 
-# Metric columns = all columns except the first (city name)
-def get_metric_columns(df):
-    """Return list of column names excluding the first column (city)."""
-    if df is None or df.empty or len(df.columns) < 2:
-        return []
-    return list(df.columns[1:])
-
-
-def load_reduced_list():
-    """
-    Load primary data from the Reduced List sheet.
-    Headers in row 7 (header=6), columns E:O. Drops null/empty city name, strips column names.
-    """
-    if not os.path.isfile(DEFAULT_DATA_PATH):
-        return None
-    df = pd.read_excel(
-        DEFAULT_DATA_PATH,
-        sheet_name="Reduced List",
-        usecols="E:O",
-        header=6,
-        engine="openpyxl",
-    )
-    df.columns = df.columns.str.strip()
-    city_col = df.columns[0]
-    df = df.dropna(subset=[city_col])
-    df = df[df[city_col].astype(str).str.strip() != ""]
-    df = df[df[city_col].astype(str).str.strip().isin(ALLOWED_CITIES)]
-    return df.reset_index(drop=True)
-
-
 def load_cooling_cost_method():
     """
     Load Cooling Cost Method sheet. Header row 0. Drops rows where City is null.
@@ -187,14 +157,8 @@ def inject_css():
 
 def setup_sidebar():
     """
-    Load both data sources into session_state and show status in sidebar.
+    Load cooling cost data into session_state and show status in sidebar.
     Call this at the top of every page so navigation and data stay in sync.
     """
-    df = load_reduced_list()
     df_cooling = load_cooling_cost_method()
-    st.session_state["df"] = df
     st.session_state["df_cooling"] = df_cooling
-    if df is not None:
-        st.sidebar.caption(f"Reduced List: **{len(df)}** cities")
-    if df_cooling is not None:
-        st.sidebar.caption(f"Cooling Cost: **{len(df_cooling)}** rows")
