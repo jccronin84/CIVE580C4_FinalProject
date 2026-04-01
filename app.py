@@ -139,7 +139,7 @@ if section == "Site Selection Analysis":
                 it_load = st.number_input(
                     "IT Load (MW)",
                     min_value=1,
-                    max_value=100,
+                    max_value=1000,
                     value=100,
                     step=1,
                     key=f"it_load_{city}",
