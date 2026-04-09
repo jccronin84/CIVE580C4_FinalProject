@@ -319,17 +319,21 @@ else:
             "Grid Carbon Intensity (kgCO2/kWh)",
             "Climate Adjusted Electricity (MWh/year)",
             "Annual CO2 (metric tons)",
+            "Carbon Price ($/metric ton)",
+            "Annual Carbon Cost ($)",
+            "Normalized Carbon Cost (Scale: 0-1)",
             "Climate Adjusted Water Use (gallons/year)",
             "Raw Water Stress Index",
             "Calculated Water Stress Score (1=low, 5=high)",
             "Sustainability Score",
             "Monthly Precip (mm)",
+            "Total Impact (2=low, 11.5=high)",
         ]
 
         df_env = pd.read_excel(
             DEFAULT_DATA_PATH,
             sheet_name="Cooling Cost Method",
-            usecols="E:O",
+            usecols="E:S",
             header=None,
             skiprows=17,
             nrows=5,
@@ -344,18 +348,34 @@ else:
         for col in numeric_cols:
             df_env[col] = pd.to_numeric(df_env[col], errors="coerce")
 
+        # Annual Carbon Cost
+        df_env["Annual Carbon Cost ($)"] = (
+            df_env["Annual CO2 (metric tons)"] * df_env["Carbon Price ($/metric ton)"]
+        )
+
+        # Normalized Carbon Cost (0-1 scale)
+        L = df_env["Annual Carbon Cost ($)"]
+        df_env["Normalized Carbon Cost (Scale: 0-1)"] = (
+            (L - L.min()) / (L.max() - L.min())
+        ).round(2)
+
+        # Raw Water Stress Index
         df_env["Raw Water Stress Index"] = (
             df_env["Climate Adjusted Water Use (gallons/year)"]
             / df_env["Avg Annual Precipitation (mm/year)"]
         ).round(0)
 
-        L = df_env["Raw Water Stress Index"]
-        if L.max() == L.min():
-            df_env["Calculated Water Stress Score (1=low, 5=high)"] = 1.0
-        else:
-            df_env["Calculated Water Stress Score (1=low, 5=high)"] = (
-                1 + 4 * (L - L.min()) / (L.max() - L.min())
-            ).round(0)
+        # Calculated Water Stress Score (1-5 scale)
+        O = df_env["Raw Water Stress Index"]
+        df_env["Calculated Water Stress Score (1=low, 5=high)"] = (
+            1 + 4 * (O - O.min()) / (O.max() - O.min())
+        ).round(0)
+
+        # Total Impact Score
+        df_env["Total Impact (2=low, 11.5=high)"] = (
+            df_env["Calculated Water Stress Score (1=low, 5=high)"] * 2
+            + df_env["Normalized Carbon Cost (Scale: 0-1)"] * 1.5
+        )
 
         selected_cities_env = st.multiselect(
             "Select Cities",
@@ -364,7 +384,22 @@ else:
         )
         selected_data_points_env = st.multiselect(
             "Select Data Points to Compare",
-            options=[c for c in ENV_COLUMNS if c != "City"],
+            options=[
+                "Avg Temp (°C)",
+                "Avg Annual Precipitation (mm/year)",
+                "Grid Carbon Intensity (kgCO2/kWh)",
+                "Climate Adjusted Electricity (MWh/year)",
+                "Annual CO2 (metric tons)",
+                "Carbon Price ($/metric ton)",
+                "Annual Carbon Cost ($)",
+                "Normalized Carbon Cost (Scale: 0-1)",
+                "Climate Adjusted Water Use (gallons/year)",
+                "Raw Water Stress Index",
+                "Calculated Water Stress Score (1=low, 5=high)",
+                "Sustainability Score",
+                "Monthly Precip (mm)",
+                "Total Impact (2=low, 11.5=high)",
+            ],
             default=[],
         )
 
@@ -441,6 +476,7 @@ else:
                         " key-row"
                         if metric
                         in {
+                            "Total Impact (2=low, 11.5=high)",
                             "Calculated Water Stress Score (1=low, 5=high)",
                             "Sustainability Score",
                         }
