@@ -1,7 +1,12 @@
 """Data Center Water Risk Dashboard with two pages."""
+import io
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 
 from utils import DEFAULT_DATA_PATH, inject_css, setup_sidebar
 
@@ -107,6 +112,113 @@ def fmt_value(field_name, value):
     if field_name in DOLLAR_FIELDS:
         return f"${value:,.2f}"
     return f"{value:,.2f}"
+
+
+DOWNLOAD_BTN_CSS = """
+<style>
+div[data-testid="stDownloadButton"] button {
+    background-color: #1A1A1A !important;
+    border: 1px solid #2E2E2E !important;
+    color: #FFFFFF !important;
+}
+</style>
+"""
+
+
+def _is_numeric_excel(val):
+    if val is None or isinstance(val, bool):
+        return False
+    try:
+        if pd.isna(val):
+            return False
+    except TypeError:
+        pass
+    try:
+        float(val)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _header_number_format(header):
+    if "$" in header:
+        return "$#,##0.00"
+    if "(%)" in header:
+        return "0.00%"
+    return "#,##0.00"
+
+
+def build_styled_xlsx_bytes(headers, rows, sheet_name):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet_name[:31]
+
+    thin_white = Side(style="thin", color="FFFFFF")
+    thin_gray = Side(style="thin", color="2E2E2E")
+    border_header = Border(
+        left=thin_white, right=thin_white, top=thin_white, bottom=thin_white
+    )
+    border_data = Border(
+        left=thin_gray, right=thin_gray, top=thin_gray, bottom=thin_gray
+    )
+
+    header_fill = PatternFill(fill_type="solid", fgColor="FF0D0D0D")
+    fill_odd = PatternFill(fill_type="solid", fgColor="FF1A1A1A")
+    fill_even = PatternFill(fill_type="solid", fgColor="FF141414")
+
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    data_font = Font(name="Calibri", size=11, color="FFF5F5F5")
+    city_bold_font = Font(name="Calibri", size=11, bold=True, color="FFF5F5F5")
+
+    for c, h in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=c, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = border_header
+        cell.alignment = Alignment(vertical="center")
+    ws.row_dimensions[1].height = 20
+
+    for r, row_vals in enumerate(rows, start=2):
+        is_odd = (r - 2) % 2 == 0
+        row_fill = fill_odd if is_odd else fill_even
+        ws.row_dimensions[r].height = 18
+        for c, val in enumerate(row_vals, start=1):
+            cell = ws.cell(row=r, column=c)
+            header = headers[c - 1]
+            cell.fill = row_fill
+            cell.border = border_data
+            cell.alignment = Alignment(vertical="center")
+            if c == 1:
+                cell.value = "" if val is None else str(val)
+                cell.font = city_bold_font
+                cell.number_format = "General"
+            else:
+                if _is_numeric_excel(val):
+                    num = float(val)
+                    if "(%)" in header:
+                        cell.value = num / 100.0
+                    else:
+                        cell.value = num
+                    cell.number_format = _header_number_format(header)
+                    cell.font = data_font
+                else:
+                    cell.value = "" if pd.isna(val) else val
+                    cell.number_format = "General"
+                    cell.font = data_font
+
+    for c in range(1, len(headers) + 1):
+        col_letter = get_column_letter(c)
+        max_len = len(str(headers[c - 1]))
+        for r in range(2, 2 + len(rows)):
+            v = ws.cell(row=r, column=c).value
+            if v is not None and v != "":
+                max_len = max(max_len, len(str(v)))
+        ws.column_dimensions[col_letter].width = min(40, max(15, max_len + 2))
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
 
 
 st.markdown("<h1 style='color:#FFFFFF; font-family: Space Grotesk, sans-serif; font-weight:700; font-size:2.5rem; margin-bottom: 0.25rem;'>Data Center Site Selection</h1>", unsafe_allow_html=True)
@@ -240,6 +352,29 @@ if section == "Site Selection Analysis":
                 st.markdown("".join(parts), unsafe_allow_html=True)
     elif selected_cities:
         st.info("Select at least one data point to display city cards.")
+
+    if selected_cities:
+        st.markdown(DOWNLOAD_BTN_CSS, unsafe_allow_html=True)
+        headers_ss = ["City", "Data Center Type", "IT Load (MW)"] + list(
+            selected_data_points
+        )
+        rows_ss = []
+        for city in selected_cities:
+            cfg = city_inputs.get(city, {"dc_type": "AI/ML Cluster", "it_load": 100})
+            row = [city, cfg["dc_type"], cfg["it_load"]]
+            for m in selected_data_points:
+                row.append(city_results[city][m])
+            rows_ss.append(row)
+        xlsx_ss = build_styled_xlsx_bytes(
+            headers_ss, rows_ss, "Site Selection Analysis"
+        )
+        st.download_button(
+            label="⬇ Download to Excel",
+            data=xlsx_ss,
+            file_name="Site_Selection_Analysis.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="download_site_selection_xlsx",
+        )
 
     chart_cities = selected_cities
     elec_vals = [city_results[city]["Total Electricity Cost ($/year)"] for city in chart_cities]
@@ -493,5 +628,28 @@ else:
                 parts.append("</div>")
                 with card_cols[idx]:
                     st.markdown("".join(parts), unsafe_allow_html=True)
+
+            st.markdown(DOWNLOAD_BTN_CSS, unsafe_allow_html=True)
+            headers_env = ["City"] + list(selected_data_points_env)
+            rows_env = []
+            for city in selected_cities_env:
+                city_row = env_df_selected[env_df_selected["City"] == city]
+                if city_row.empty:
+                    continue
+                ser = city_row.iloc[0]
+                row = [city]
+                for m in selected_data_points_env:
+                    row.append(ser.get(m))
+                rows_env.append(row)
+            xlsx_env = build_styled_xlsx_bytes(
+                headers_env, rows_env, "Environmental Impacts"
+            )
+            st.download_button(
+                label="⬇ Download to Excel",
+                data=xlsx_env,
+                file_name="Environmental_Impacts.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="download_environmental_impacts_xlsx",
+            )
     except Exception as exc:
         st.error(f"Unable to load Environmental Impacts table: {exc}")
