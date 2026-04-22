@@ -149,6 +149,21 @@ def inject_css():
             .stApp > header {
                 background-color: #000000 !important;
             }
+            /* Override dark table text on Overview & User Guide page */
+            [data-testid="stMarkdownContainer"] table,
+            [data-testid="stMarkdownContainer"] table td,
+            [data-testid="stMarkdownContainer"] table th,
+            [data-testid="stMarkdownContainer"] table tr {
+                color: #FFFFFF !important;
+                border-color: #2E2E2E !important;
+            }
+
+            /* Override dark list text on Overview & User Guide page */
+            [data-testid="stMarkdownContainer"] ul li,
+            [data-testid="stMarkdownContainer"] ol li,
+            [data-testid="stMarkdownContainer"] p {
+                color: #FFFFFF !important;
+            }
         </style>
         """,
         unsafe_allow_html=True,

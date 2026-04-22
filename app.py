@@ -25,8 +25,7 @@ COOLING_DATA_POINTS = [
     "Total Electricity Cost ($/year)",
     "Load Factor (%)",
     "Range (°C)",
-    "CoC",
-    "Tons",
+    "Tons (Cooling Load)",
     "Evap (gpm)",
     "Blowdown (gpm)",
     "Drift (gpm)",
@@ -66,7 +65,7 @@ setup_sidebar()
 st.sidebar.markdown("<h1 style='color:#FFFFFF; font-family: Space Grotesk, sans-serif; font-weight:700; font-size:1.6rem; margin-bottom:0.25rem;'>Data Center Site Selection</h1>", unsafe_allow_html=True)
 section = st.sidebar.radio(
     "Navigate",
-    options=["Site Selection Analysis", "Environmental Impacts"],
+    options=["Overview & User Guide", "Site Selection Analysis", "Environmental Impacts"],
 )
 
 
@@ -94,8 +93,7 @@ def compute_city_metrics(city, dc_type, it_load):
         "Total Electricity Cost ($/year)": total_elec_cost,
         "Load Factor (%)": load_factor * 100,
         "Range (°C)": range_c,
-        "CoC": coc,
-        "Tons": tons,
+        "Tons (Cooling Load)": tons,
         "Evap (gpm)": evap,
         "Blowdown (gpm)": blowdown,
         "Drift (gpm)": drift,
@@ -222,7 +220,64 @@ def build_styled_xlsx_bytes(headers, rows, sheet_name):
 
 
 st.markdown("<h1 style='color:#FFFFFF; font-family: Space Grotesk, sans-serif; font-weight:700; font-size:2.5rem; margin-bottom: 0.25rem;'>Data Center Site Selection</h1>", unsafe_allow_html=True)
-if section == "Site Selection Analysis":
+if section == "Overview & User Guide":
+    st.title("Overview & User Guide")
+
+    st.subheader("About")
+    st.markdown(
+        """
+This dashboard is designed to support decision making in selecting suitable locations for data centers.
+It allows the user to analyze key factors such as the cost of power and water, climate conditions, and
+environmental impacts in a single, easy-to-use interface. Users can explore locations, adjust data center
+configurations, and compare results to identify sites that best meet their needs. No technical background
+is required — this tool is built to provide clear insights for confident decisions.
+"""
+    )
+
+    st.subheader("Tips & Help")
+    st.markdown("Use the table below as a quick reference guide for each part of the dashboard.")
+    st.markdown(
+        """
+| App Text | Help Text |
+| --- | --- |
+| Select Cities | Select one or more cities from the dropdown list to compare. |
+| Select Data Points to Compare | Use the dropdown list to select as many factors for comparison as required. See the definitions below for a description of each factor. |
+| Data Center Type | Select the type of data center: AI/ML Cluster — Used for advanced computing (e.g., artificial intelligence models using GPUs) that requires more electricity for power and water for cooling. Hyperscale Cloud — Used for large-scale, general purpose cloud computing and storage (e.g., general web services using CPUs) that requires less electricity for power and water for cooling. This helps match locations to your needs. |
+| IT Load | Enter the expected power demand for your data center up to 1,000 MW. Larger values mean more electricity is needed to power IT equipment and more water is needed for cooling. This input can affect which locations are suitable for the planned data center. |
+"""
+    )
+
+    st.subheader("Site Selection Analysis — Data Point Definitions")
+    st.markdown(
+        """
+- **Tons (Cooling Load):** This shows how much cooling the data center needs to remove heat from equipment. Higher values mean more cooling capacity is required.
+- **Evap (gpm):** Water used during cooling as it evaporates to remove heat. This is the main source of water use in the system.
+- **Blowdown (gpm):** Water that is discharged from the system to prevent buildup of minerals. This depends on water quality and system settings.
+- **Drift (gpm):** A very small amount of water lost as fine mist during operation. This is typically minimal compared to other losses.
+- **Peak Makeup (gpm):** The total water needed at peak operation, including all losses. This represents the maximum demand on the water supply at any moment.
+- **Peak Makeup (MGD):** The highest total water required in a single day. This helps assess whether local water systems can meet demand.
+- **Peak Annual Makeup (MGY):** The estimated maximum water use over a full year under peak conditions.
+- **Actual Annual Makeup (MGY):** The expected total water use over a typical year, based on average operating conditions.
+- **Water Rate ($/1000 gal):** The local cost of water. This directly affects operating expenses.
+- **Total Water Cost ($/year):** The estimated yearly cost of water based on total usage and local rates.
+"""
+    )
+
+    st.subheader("Environmental & Sustainability Metrics — Data Point Definitions")
+    st.markdown(
+        """
+- **Carbon Price ($/metric ton):** The cost applied to each unit of carbon emissions. This value is used to estimate the environmental cost of energy use.
+- **Annual Carbon Cost ($):** The estimated yearly cost of carbon emissions based on energy use and local carbon pricing.
+- **Normalized Carbon Cost (Scale: 0–1):** A simplified score showing how carbon costs compare across locations. Lower values are better.
+- **Climate Adjusted Water Use (gallons/year):** Estimated yearly water use adjusted for the local climate. Hotter or drier areas may require more water for cooling.
+- **Raw Water Stress Index:** A measure of how limited or strained water resources are in this area. Higher values indicate greater pressure on water supply.
+- **Calculated Water Stress Score (1=low, 5=high):** A simplified rating of water availability. Lower scores mean water is more readily available.
+- **Sustainability Score:** An overall score combining environmental factors such as carbon impact and water use. Lower scores generally indicate a more sustainable location.
+- **Monthly Precip (mm):** The average monthly rainfall in this location. Higher rainfall may help support water availability.
+- **Total Impact (2=low, 11.5=high):** A combined score showing the overall environmental impact of the site. Lower values indicate more favorable conditions.
+"""
+    )
+elif section == "Site Selection Analysis":
     st.title("Site Selection Analysis")
 
     selected_cities = st.multiselect(
