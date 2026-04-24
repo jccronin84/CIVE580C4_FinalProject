@@ -65,7 +65,7 @@ setup_sidebar()
 st.sidebar.markdown("<h1 style='color:#FFFFFF; font-family: Space Grotesk, sans-serif; font-weight:700; font-size:1.6rem; margin-bottom:0.25rem;'>Data Center Site Selection</h1>", unsafe_allow_html=True)
 section = st.sidebar.radio(
     "Navigate",
-    options=["Overview & User Guide", "Site Selection Analysis", "Environmental Impacts"],
+    options=["Overview & User Guide", "Site Selection Analysis", "Environmental Impacts", "Summary"],
 )
 
 
@@ -219,6 +219,85 @@ def build_styled_xlsx_bytes(headers, rows, sheet_name):
     return buf.getvalue()
 
 
+def build_summary_xlsx_bytes(cooling_payload=None, env_payload=None):
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    def add_styled_sheet(headers, rows, sheet_name):
+        ws = wb.create_sheet(title=sheet_name[:31])
+
+        thin_white = Side(style="thin", color="FFFFFF")
+        thin_gray = Side(style="thin", color="2E2E2E")
+        border_header = Border(
+            left=thin_white, right=thin_white, top=thin_white, bottom=thin_white
+        )
+        border_data = Border(
+            left=thin_gray, right=thin_gray, top=thin_gray, bottom=thin_gray
+        )
+
+        header_fill = PatternFill(fill_type="solid", fgColor="FF0D0D0D")
+        fill_odd = PatternFill(fill_type="solid", fgColor="FF1A1A1A")
+        fill_even = PatternFill(fill_type="solid", fgColor="FF141414")
+
+        header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+        data_font = Font(name="Calibri", size=11, color="FFF5F5F5")
+        city_bold_font = Font(name="Calibri", size=11, bold=True, color="FFF5F5F5")
+
+        for c, h in enumerate(headers, start=1):
+            cell = ws.cell(row=1, column=c, value=h)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.border = border_header
+            cell.alignment = Alignment(vertical="center")
+        ws.row_dimensions[1].height = 20
+
+        for r, row_vals in enumerate(rows, start=2):
+            is_odd = (r - 2) % 2 == 0
+            row_fill = fill_odd if is_odd else fill_even
+            ws.row_dimensions[r].height = 18
+            for c, val in enumerate(row_vals, start=1):
+                cell = ws.cell(row=r, column=c)
+                header = headers[c - 1]
+                cell.fill = row_fill
+                cell.border = border_data
+                cell.alignment = Alignment(vertical="center")
+                if c == 1:
+                    cell.value = "" if val is None else str(val)
+                    cell.font = city_bold_font
+                    cell.number_format = "General"
+                else:
+                    if _is_numeric_excel(val):
+                        cell.value = float(val)
+                        cell.number_format = "$#,##0.00" if "$" in header else "#,##0.00"
+                        cell.font = data_font
+                    else:
+                        cell.value = "" if pd.isna(val) else val
+                        cell.number_format = "General"
+                        cell.font = data_font
+
+        for c in range(1, len(headers) + 1):
+            col_letter = get_column_letter(c)
+            max_len = len(str(headers[c - 1]))
+            for r in range(2, 2 + len(rows)):
+                v = ws.cell(row=r, column=c).value
+                if v is not None and v != "":
+                    max_len = max(max_len, len(str(v)))
+            ws.column_dimensions[col_letter].width = min(40, max(15, max_len + 2))
+
+    if cooling_payload:
+        cooling_headers, cooling_rows = cooling_payload
+        add_styled_sheet(cooling_headers, cooling_rows, "Site Selection Analysis")
+
+    if env_payload:
+        env_headers, env_rows = env_payload
+        add_styled_sheet(env_headers, env_rows, "Environmental Impacts")
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
 st.markdown("<h1 style='color:#FFFFFF; font-family: Space Grotesk, sans-serif; font-weight:700; font-size:2.5rem; margin-bottom: 0.25rem;'>Data Center Site Selection</h1>", unsafe_allow_html=True)
 if section == "Overview & User Guide":
     st.title("Overview & User Guide")
@@ -277,6 +356,16 @@ is required — this tool is built to provide clear insights for confident decis
 - **Total Impact (2=low, 11.5=high):** A combined score showing the overall environmental impact of the site. Lower values indicate more favorable conditions.
 """
     )
+    st.subheader("Baseline Data Sources")
+    st.markdown("""
+- **Average Temperature (°C):** The monthly average temperature for each city, in degrees Celsius, was collected from the National Oceanic and Atmospheric Administration's (NOAA) Climate Data Online (CDO) portal and averaged to obtain the annual averages. URL: https://www.ncdc.noaa.gov/cdo-web/
+
+- **Precipitation (mm/year):** The monthly precipitation rates for each city, in millimeters per year, were collected from NOAA's Climate Gridded Dataset (nClimGrid) portal and averaged to obtain the annual rates. URL: https://www.drought.gov/data-maps-tools/noaas-nclimgrid-monthly
+
+- **Grid Carbon Intensity (kgCO₂/kWh):** The grid carbon intensity for each city, in kilograms of carbon dioxide per kilowatt hour, was aggregated from the Environmental Protection Agency's (EPA) Emissions and Generation Resource Integrated Database (eGRID) datasets and used for the app's calculation of total carbon emissions in metric tons of CO₂.
+
+- **Water Price ($/1000 gal):** The price of water in dollars per one thousand gallons was collected from each city's respective municipal utility datasets and later used to calculate the total cost of water for each data center layout.
+""")
 elif section == "Site Selection Analysis":
     st.title("Site Selection Analysis")
 
@@ -408,29 +497,6 @@ elif section == "Site Selection Analysis":
     elif selected_cities:
         st.info("Select at least one data point to display city cards.")
 
-    if selected_cities:
-        st.markdown(DOWNLOAD_BTN_CSS, unsafe_allow_html=True)
-        headers_ss = ["City", "Data Center Type", "IT Load (MW)"] + list(
-            selected_data_points
-        )
-        rows_ss = []
-        for city in selected_cities:
-            cfg = city_inputs.get(city, {"dc_type": "AI/ML Cluster", "it_load": 100})
-            row = [city, cfg["dc_type"], cfg["it_load"]]
-            for m in selected_data_points:
-                row.append(city_results[city][m])
-            rows_ss.append(row)
-        xlsx_ss = build_styled_xlsx_bytes(
-            headers_ss, rows_ss, "Site Selection Analysis"
-        )
-        st.download_button(
-            label="⬇ Download to Excel",
-            data=xlsx_ss,
-            file_name="Site_Selection_Analysis.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="download_site_selection_xlsx",
-        )
-
     chart_cities = selected_cities
     elec_vals = [city_results[city]["Total Electricity Cost ($/year)"] for city in chart_cities]
     water_vals = [city_results[city]["Total Water Cost ($/year)"] for city in chart_cities]
@@ -496,9 +562,51 @@ elif section == "Site Selection Analysis":
         ),
     )
     fig_cc.update_yaxes(tickformat="$,.0f")
+
+    if selected_cities:
+        st.markdown(DOWNLOAD_BTN_CSS, unsafe_allow_html=True)
+        headers_ss = ["City", "Data Center Type", "IT Load (MW)"] + list(
+            selected_data_points
+        )
+        rows_ss = []
+        for city in selected_cities:
+            cfg = city_inputs.get(city, {"dc_type": "AI/ML Cluster", "it_load": 100})
+            row = [city, cfg["dc_type"], cfg["it_load"]]
+            for m in selected_data_points:
+                row.append(city_results[city][m])
+            rows_ss.append(row)
+        xlsx_ss = build_styled_xlsx_bytes(
+            headers_ss, rows_ss, "Site Selection Analysis"
+        )
+        btn_col1, btn_col2 = st.columns(2)
+        with btn_col1:
+            st.download_button(
+                label="⬇ Download to Excel",
+                data=xlsx_ss,
+                file_name="Site_Selection_Analysis.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="download_site_selection_xlsx",
+            )
+        with btn_col2:
+            if st.button("📋 Send to Summary", key="send_site_selection_to_summary"):
+                st.session_state["summary_cooling_cities"] = list(selected_cities)
+                st.session_state["summary_cooling_data"] = {
+                    city: dict(metrics) for city, metrics in city_results.items()
+                }
+                st.session_state["summary_cooling_dc_type"] = {
+                    city: city_inputs.get(city, {}).get("dc_type", "AI/ML Cluster")
+                    for city in selected_cities
+                }
+                st.session_state["summary_cooling_it_load"] = {
+                    city: city_inputs.get(city, {}).get("it_load", 100)
+                    for city in selected_cities
+                }
+                st.session_state["summary_cooling_chart"] = fig_cc
+                st.session_state["summary_cooling_selected_points"] = list(selected_data_points)
+                st.success("✅ Sent to Summary page!")
     st.plotly_chart(fig_cc, use_container_width=True)
 
-else:
+elif section == "Environmental Impacts":
     st.title("Environmental Impacts")
 
     try:
@@ -699,12 +807,260 @@ else:
             xlsx_env = build_styled_xlsx_bytes(
                 headers_env, rows_env, "Environmental Impacts"
             )
-            st.download_button(
-                label="⬇ Download to Excel",
-                data=xlsx_env,
-                file_name="Environmental_Impacts.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="download_environmental_impacts_xlsx",
-            )
+            btn_col1, btn_col2 = st.columns(2)
+            with btn_col1:
+                st.download_button(
+                    label="⬇ Download to Excel",
+                    data=xlsx_env,
+                    file_name="Environmental_Impacts.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="download_environmental_impacts_xlsx",
+                )
+            with btn_col2:
+                if st.button("📋 Send to Summary", key="send_environmental_to_summary"):
+                    st.session_state["summary_env_cities"] = list(selected_cities_env)
+                    st.session_state["summary_env_data"] = (
+                        env_df_selected[env_df_selected["City"].isin(selected_cities_env)]
+                        .set_index("City")
+                        .to_dict(orient="index")
+                    )
+                    st.session_state["summary_env_selected_points"] = list(
+                        selected_data_points_env
+                    )
+                    st.success("✅ Sent to Summary page!")
     except Exception as exc:
         st.error(f"Unable to load Environmental Impacts table: {exc}")
+else:
+    st.title("Summary")
+
+    has_cooling = "summary_cooling_data" in st.session_state
+    has_env = "summary_env_data" in st.session_state
+
+    if not has_cooling and not has_env:
+        st.info(
+            "No data sent yet. Use the 'Send to Summary' button on the Site Selection Analysis or Environmental Impacts pages to populate this page."
+        )
+    else:
+        st.markdown(
+            """
+            <style>
+            .summary-card {
+                background-color: #141414;
+                border: 1px solid #2E2E2E;
+                border-radius: 12px;
+                box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+                padding: 24px;
+                margin-bottom: 16px;
+            }
+            .summary-card .card-header {
+                color: #F5F5F5;
+                font-weight: 800;
+                margin-bottom: 16px;
+                padding-bottom: 10px;
+                font-size: 1.5rem;
+                border-bottom: 1px solid #FFFFFF;
+            }
+            .summary-card .metric-row {
+                display: flex;
+                justify-content: space-between;
+                align-items: baseline;
+                gap: 12px;
+                padding: 10px 0;
+                border-bottom: 1px solid #2E2E2E;
+            }
+            .summary-card .metric-row:last-child {
+                border-bottom: none;
+            }
+            .summary-card .metric-row.key-row {
+                background: #1F1F1F;
+                border-radius: 8px;
+                padding: 12px 10px;
+                margin: 4px 0;
+            }
+            .summary-card .metric-label {
+                color: #888888;
+                font-size: 0.8rem;
+                line-height: 1.2;
+                max-width: 58%;
+            }
+            .summary-card .metric-value {
+                color: #FFFFFF;
+                font-size: 1.4rem;
+                font-weight: 800;
+                text-align: right;
+                line-height: 1.1;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if has_cooling:
+            st.subheader("Site Selection Analysis")
+            summary_cooling_data = st.session_state["summary_cooling_data"]
+            summary_cities = st.session_state.get(
+                "summary_cooling_cities", list(summary_cooling_data.keys())
+            )
+            summary_dc_type = st.session_state.get("summary_cooling_dc_type", {})
+            summary_it_load = st.session_state.get("summary_cooling_it_load", {})
+            summary_selected_points = st.session_state.get(
+                "summary_cooling_selected_points", []
+            )
+
+            card_cols = st.columns(len(summary_cities)) if summary_cities else []
+            for idx, city in enumerate(summary_cities):
+                metrics = summary_cooling_data.get(city, {})
+                parts = [f'<div class="summary-card"><div class="card-header">{city}</div>']
+                parts.append(
+                    (
+                        '<div class="metric-row">'
+                        '<div class="metric-label">Data Center Type</div>'
+                        f'<div class="metric-value">{summary_dc_type.get(city, "N/A")}</div>'
+                        "</div>"
+                    )
+                )
+                parts.append(
+                    (
+                        '<div class="metric-row">'
+                        '<div class="metric-label">IT Load (MW)</div>'
+                        f'<div class="metric-value">{summary_it_load.get(city, "N/A")}</div>'
+                        "</div>"
+                    )
+                )
+                for metric in summary_selected_points:
+                    if metric not in metrics:
+                        continue
+                    key_row_class = (
+                        " key-row"
+                        if metric
+                        in {"Total Electricity Cost ($/year)", "Total Water Cost ($/year)"}
+                        else ""
+                    )
+                    parts.append(
+                        (
+                            f'<div class="metric-row{key_row_class}">'
+                            f'<div class="metric-label">{metric}</div>'
+                            f'<div class="metric-value">{fmt_value(metric, metrics[metric])}</div>'
+                            "</div>"
+                        )
+                    )
+                parts.append("</div>")
+                with card_cols[idx]:
+                    st.markdown("".join(parts), unsafe_allow_html=True)
+
+            if "summary_cooling_chart" in st.session_state:
+                st.plotly_chart(
+                    st.session_state["summary_cooling_chart"], use_container_width=True
+                )
+
+        if has_env:
+            st.subheader("Environmental Impacts")
+            summary_env_data = st.session_state["summary_env_data"]
+            summary_env_cities = st.session_state.get(
+                "summary_env_cities", list(summary_env_data.keys())
+            )
+            summary_env_selected_points = st.session_state.get(
+                "summary_env_selected_points", []
+            )
+
+            card_cols = st.columns(len(summary_env_cities)) if summary_env_cities else []
+            for idx, city in enumerate(summary_env_cities):
+                metrics = summary_env_data.get(city, {})
+                parts = [f'<div class="summary-card"><div class="card-header">{city}</div>']
+                for metric in summary_env_selected_points:
+                    if metric not in metrics:
+                        continue
+                    key_row_class = (
+                        " key-row"
+                        if metric
+                        in {
+                            "Total Impact (2=low, 11.5=high)",
+                            "Calculated Water Stress Score (1=low, 5=high)",
+                            "Sustainability Score",
+                        }
+                        else ""
+                    )
+                    val = metrics[metric]
+                    value_fmt = f"{val:,.2f}" if pd.notna(val) else "N/A"
+                    parts.append(
+                        (
+                            f'<div class="metric-row{key_row_class}">'
+                            f'<div class="metric-label">{metric}</div>'
+                            f'<div class="metric-value">{value_fmt}</div>'
+                            "</div>"
+                        )
+                    )
+                parts.append("</div>")
+                with card_cols[idx]:
+                    st.markdown("".join(parts), unsafe_allow_html=True)
+
+        st.markdown(DOWNLOAD_BTN_CSS, unsafe_allow_html=True)
+        cooling_payload = None
+        env_payload = None
+
+        if has_cooling:
+            summary_cooling_data = st.session_state["summary_cooling_data"]
+            summary_cities = st.session_state.get(
+                "summary_cooling_cities", list(summary_cooling_data.keys())
+            )
+            summary_dc_type = st.session_state.get("summary_cooling_dc_type", {})
+            summary_it_load = st.session_state.get("summary_cooling_it_load", {})
+            summary_selected_points = st.session_state.get(
+                "summary_cooling_selected_points", []
+            )
+            cooling_headers = ["City", "Data Center Type", "IT Load (MW)"] + list(
+                summary_selected_points
+            )
+            cooling_rows = []
+            for city in summary_cities:
+                city_metrics = summary_cooling_data.get(city, {})
+                row = [city, summary_dc_type.get(city), summary_it_load.get(city)]
+                for metric in summary_selected_points:
+                    row.append(city_metrics.get(metric))
+                cooling_rows.append(row)
+            cooling_payload = (cooling_headers, cooling_rows)
+
+        if has_env:
+            summary_env_data = st.session_state["summary_env_data"]
+            summary_env_cities = st.session_state.get(
+                "summary_env_cities", list(summary_env_data.keys())
+            )
+            summary_env_selected_points = st.session_state.get(
+                "summary_env_selected_points", []
+            )
+            env_headers = ["City"] + list(summary_env_selected_points)
+            env_rows = []
+            for city in summary_env_cities:
+                city_metrics = summary_env_data.get(city, {})
+                row = [city]
+                for metric in summary_env_selected_points:
+                    row.append(city_metrics.get(metric))
+                env_rows.append(row)
+            env_payload = (env_headers, env_rows)
+
+        xlsx_summary = build_summary_xlsx_bytes(cooling_payload, env_payload)
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            st.download_button(
+                label="⬇ Download to Excel",
+                data=xlsx_summary,
+                file_name="Summary.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="download_summary_xlsx",
+            )
+        with col2:
+            if st.button("🗑️ Clear Data"):
+                for key in [
+                    "summary_cooling_cities",
+                    "summary_cooling_data",
+                    "summary_cooling_dc_type",
+                    "summary_cooling_it_load",
+                    "summary_cooling_chart",
+                    "summary_cooling_selected_points",
+                    "summary_env_cities",
+                    "summary_env_data",
+                    "summary_env_selected_points",
+                ]:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                st.rerun()
